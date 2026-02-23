@@ -1,17 +1,21 @@
-"""
-run_experiments.py -- Automated experiment runner for Project 1.
-
-Usage:
-    python run_experiments.py                        # basic SAT/UNSAT tests
-    python run_experiments.py --pigeon               # basic + hole6/7/8
-    python run_experiments.py --hole 6 7 8 9         # specific hole instances
-    python run_experiments.py --all                  # everything (slow!)
-
-    python run_experiments.py --check-only           # verify existing proofs (no solver)
-    python run_experiments.py --check-only --pigeon  # check hole6/7/8 proofs
-
-    python run_experiments.py --clean                # delete all proof_*.txt files
-"""
+# =============================================================================
+# run_experiments.py -- Automated experiment runner for Project 1 (CDCL solver)
+# =============================================================================
+#
+# COMMANDS
+# --------
+#   python run_experiments.py                     basic SAT/UNSAT tests (8 instances)
+#   python run_experiments.py --pigeon            basic + pigeon-hole hole6/7/8
+#   python run_experiments.py --hole 6 7          specific hole instances
+#   python run_experiments.py --all               all instances incl. hole9/10 (slow!)
+#
+#   python run_experiments.py --check-only        verify existing proof files (no solver)
+#   python run_experiments.py --check-only --pigeon
+#
+#   python run_experiments.py --clean             delete generated proof_*.txt files
+#                                                 (proof_example.txt is preserved as
+#                                                  a format illustration)
+# =============================================================================
 
 import argparse
 import glob
