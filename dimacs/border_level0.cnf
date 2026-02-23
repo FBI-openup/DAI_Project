@@ -1,0 +1,6 @@
+p cnf 1 2
+c Border case: level-0 conflict (unit BCP at decision level 0)
+c Variables: x1
+c Clauses: {x1} and {-x1} -- immediately contradictory
+1 0
+-1 0

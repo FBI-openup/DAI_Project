@@ -42,6 +42,7 @@ BASIC_TESTS = [
     ("multiline.cnf",      "dimacs/multiline.cnf",           "SAT"),
     ("large.cnf",          "dimacs/large.cnf",               "SAT"),
     ("DPLL example2",      "dimacs/DPLL example2",           "UNSAT"),
+    ("border_level0.cnf",  "dimacs/border_level0.cnf",       "UNSAT"),  # edge case: conflict at DL0
 ]
 
 PIGEON_TESTS = {
