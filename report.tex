@@ -27,7 +27,7 @@
 \author{ZHANG Boyuan\\
   \small CSC\_54656 EP --- Satisfiability and SMT Solving
 }
-\date{February 23, 2026}
+\date{}
 \maketitle
 
 %-----------------------------------------------------------------------
@@ -37,217 +37,296 @@ We extend the CDCL solver developed in Tutorial~2 to emit a
 \emph{resolution proof} for every unsatisfiable instance, and implement
 an independent linear-time \emph{proof checker} that validates the proof
 against the original formula.
-The approach deliberately follows the na\"ive strategy described
-in~\cite{biere2008picosat}: every resolution step performed during
-conflict analysis is recorded verbatim, so no additional theory is
-needed.
-Experiments on the pigeon-hole benchmark family confirm that both
-the solver and the checker are correct.
+The design follows the na\"ive strategy of~\cite{biere2008picosat}:
+every resolution step performed during conflict analysis is recorded
+verbatim, with no preprocessing steps and no clause deletion tracking.
+This keeps the proof format minimal, the checker trivial to implement,
+and the correctness argument transparent.
+Experiments on 12 instances---including the pigeon-hole benchmark
+family up to $n=8$---confirm that the solver and checker are correct.
 
 %-----------------------------------------------------------------------
 \section{Problem Description}
 %-----------------------------------------------------------------------
 
-A CDCL SAT solver answers either \textsc{Sat} (with a satisfying
-assignment) or \textsc{Unsat} (no such assignment exists).
-While a satisfying assignment is trivially checkable, an
-\textsc{Unsat} answer is only credible if accompanied by a
-\emph{proof of unsatisfiability}.
+\subsection{From Tutorial 2 to Project 1}
 
-Resolution is the natural proof system for propositional logic
-(\cref{eq:resolution}).
-Given two clauses $C_1 \vee \neg p$ and $C_2 \vee p$ that disagree on
-literal $p$ (the \emph{pivot}), their \emph{resolvent} is $C_1 \vee C_2$.
+Tutorial~2 asked us to implement a complete CDCL SAT solver with
+Boolean Constraint Propagation (BCP), 1st-UIP conflict analysis,
+non-chronological backtracking, and clause learning.
+The solver can answer \textsc{Sat} (returning a satisfying
+assignment) or \textsc{Unsat}.
+
+Project~1 extends this with a \emph{proof of unsatisfiability}.
+This matters for two reasons.
+First, from a \emph{trust} perspective: when a solver outputs
+\textsc{Unsat}, no assignment exists as a witness---the only way to
+gain confidence is to accompany the answer with a proof that a
+trusted third party can check.
+Second, from a \emph{correctness} perspective: bugs in SAT solvers are
+known to produce wrong \textsc{Unsat} answers~\cite{biere2008picosat};
+a checkable proof makes such errors detectable.
+
+\subsection{Resolution as a Proof System}
+
+Resolution is the canonical proof system for propositional
+unsatisfiability (\cref{eq:resolution}).
+Given two clauses $(C_1 \vee \neg p)$ and $(C_2 \vee p)$ that contain
+complementary occurrences of literal $p$ (the \emph{pivot}), their
+\emph{resolvent} is $C_1 \vee C_2$, which is a logical consequence of
+both parent clauses.
 
 \begin{equation}
   \frac{C_1 \vee \neg p \quad C_2 \vee p}{C_1 \vee C_2}
   \label{eq:resolution}
 \end{equation}
 
-A \emph{resolution refutation} is a sequence of such steps that derives
-the empty clause~$\bot$ from the initial clauses, witnessing
+A \emph{resolution refutation} is a finite sequence of such steps
+starting from the input clauses and deriving the empty clause
+$\bot$, which has no satisfying assignment---thereby witnessing
 unsatisfiability.
-Because CDCL conflict analysis already performs resolution
-(1st-UIP derivation), logging the steps costs minimal overhead.
+
+The connection to CDCL is direct: every \emph{conflict analysis} step
+already computes a resolution (resolving the current conflict clause
+against a reason clause from the trail to eliminate one literal).
+Logging each such step is therefore a natural and low-overhead extension.
 
 %-----------------------------------------------------------------------
 \section{Implementation}
 %-----------------------------------------------------------------------
 
-\subsection{Proof Format}
+\subsection{Proof Format Design}
 
-Each proof file is plain UTF-8 text.
-The header declares the number of initial clauses (assigned IDs
-$1\ldots n$ in DIMACS order), and every subsequent line records one
-resolution step:
+\paragraph{Design choice.}
+We chose the simplest possible line-oriented plain-text format.
+Each line encodes exactly one resolution step:
 
 \begin{lstlisting}
 p proof <n>
 <new_id> <pivot> <id1> <id2> : <lit1> <lit2> ... 0
 \end{lstlisting}
 
-\noindent where \texttt{id1} contains $-$\texttt{pivot},
-\texttt{id2} contains $+$\texttt{pivot}, and the resolvent literals
-follow the colon, terminated by zero (an empty resolvent,
-i.e.\ just \texttt{0}, represents the empty clause).
-This format is intentionally minimal: a single forward scan suffices
-for both production and verification.
+\noindent
+The header \texttt{p proof n} declares that initial clauses carry IDs
+$1\ldots n$ (in DIMACS order).
+Each subsequent line gives the new clause~ID, the pivot literal,
+the two parent IDs, and the resolvent literals terminated by zero.
+The empty clause is represented by a bare \texttt{0}.
 
-\subsection{Solver Extension (\texttt{cdcl.py})}
+\paragraph{Trade-offs.}
+The format is deliberately \emph{redundant}: the resolvent is fully
+spelled out even though a checker could recompute it.
+This makes verification a pure equality check---no resolution
+computation is needed---and makes the proof human-readable for debugging.
+The cost is a larger file size compared to a compact binary format such
+as DRAT~\cite{biere2008picosat}, but for the problem sizes considered
+(up to 4.6\,MB for hole8) this is acceptable.
+A single forward pass over the file with no backtracking suffices for
+both production and checking.
 
-Three components were added to the Tutorial~2 CDCL skeleton.
+\subsection{Equipping the Solver with Proof Production}
 
-\paragraph{Proof logger.}
-\texttt{ProofLogger} wraps a file handle and exposes a single method
+Three components were added to the Tutorial~2 CDCL skeleton in
+\texttt{cdcl.py}.
+
+\paragraph{Proof logger (trade-off: branch-free design).}
+\texttt{ProofLogger} wraps a file handle and exposes one method:
 \texttt{log\_step(new\_id, pivot, id1, id2, resolvent)}.
-A companion \texttt{\_NullLogger} implements the same interface as a
-no-op, so the solver body contains no conditional branches:
-proof production is controlled entirely by whether a path is passed to
-\texttt{CDCL(clauses, proof\_file=\ldots)}.
+A companion \texttt{\_NullLogger} implements the identical interface
+as a no-op.
+The key design decision is that \texttt{CDCL} always holds a logger
+object (either real or null); the main solver loop contains
+\emph{no conditionals for proof mode}.
+This avoids performance regressions when proof production is disabled
+and eliminates a class of bugs where a conditional branch is
+accidentally omitted.
+Proof production is activated by passing \texttt{proof\_file} to the
+constructor; the default \texttt{None} preserves full backward
+compatibility with the Tutorial~2 interface.
 
-\paragraph{Clause ID tables.}
+\paragraph{Clause ID tables (trade-off: dual lookup strategy).}
 \texttt{ClauseDb} maintains two dictionaries:
 \begin{itemize}
-  \item \texttt{clause\_id[id(list)]} maps Python object identity to proof ID~---
-    used when \texttt{deduce()} returns the exact list object;
-  \item \texttt{content\_to\_id[tuple(sorted(lits))]} provides a content-based
-    fallback for reason clauses whose identity may differ.
+  \item \texttt{clause\_id[\,id(list)]} maps \emph{Python object
+    identity} to proof ID.
+    This is the fast path: \texttt{deduce()} returns the exact list
+    object stored in \texttt{ClauseDb.clauses}, so the identity lookup
+    is an $O(1)$ dictionary hit.
+  \item \texttt{content\_to\_id[\,tuple(sorted(lits))]} provides a
+    \emph{content-based fallback}.
+    When a reason clause is accessed via a different code path (e.g.\
+    after \texttt{learn()} appends a new list), only its content is
+    guaranteed to match.
 \end{itemize}
-Initial clauses receive IDs $1\ldots n$; learned clauses are numbered
-from $n{+}1$ upward via a shared counter \texttt{next\_id}.
+Initial clauses receive IDs $1\ldots n$; learned clauses are assigned
+IDs from $n{+}1$ upward via a shared counter.
+This dual-map strategy avoids a full scan of all clauses to find a
+proof ID, keeping each lookup to $O(1)$.
 
-\paragraph{Proof derivation.}
-\texttt{analyze()} logs one \texttt{log\_step} call per resolution
-performed during 1st-UIP derivation via the helper
-\texttt{\_proof\_resolve\_step()}.
-A second helper, \texttt{\_finish\_proof\_to\_empty()}, handles the
-case where the solver is about to return \textsc{Unsat} but the current
-working clause still contains literals.
-This occurs when the 1st-UIP learned clause is a unit fact whose
-negation is only derivable after backtracking and re-running BCP.
-The solution is to \emph{not} derive the empty clause inside
-\texttt{analyze}; instead, \texttt{solve()} detects a conflict at
-decision level~0 after the subsequent BCP pass and calls
-\texttt{\_finish\_proof\_to\_empty()} with a trail in which every entry
-carries a reason clause (no decisions remain), guaranteeing complete
-reduction to~$\bot$.
+\paragraph{Proof derivation and the level-0 edge case.}
+\texttt{analyze()} logs one resolution step for each literal eliminated
+during 1st-UIP derivation, via the helper \texttt{\_proof\_resolve\_step()}.
+This produces a learned clause whose proof ID is registered before the
+clause is passed to \texttt{learn()}.
+
+A subtle edge case arises when the solver must return \textsc{Unsat}
+but the derived learned clause is not yet the empty clause: after
+backtracking to level~0 and running BCP again, a new conflict is
+detected whose resolution to $\bot$ requires resolving against BCP-forced
+unit clauses on the trail.
+The solution is to \emph{postpone} empty-clause derivation: instead
+of calling \texttt{\_finish\_proof\_to\_empty} inside \texttt{analyze},
+\texttt{solve()} detects any conflict at decision level~0 and calls
+\texttt{\_finish\_proof\_to\_empty} at that point.
+At level~0 the trail contains only BCP-forced entries (no decisions),
+so every literal in the working clause has a reason clause available,
+and the loop terminates with the empty clause.
 
 \subsection{Proof Checker (\texttt{proof\_checker.py})}
 
-The checker is completely independent of \texttt{cdcl.py}
-(no shared imports).
-It reads the DIMACS instance into a dictionary
-$\textit{clause\_db}: \mathbb{Z} \to \mathcal{P}(\mathbb{Z})$,
-then makes a single forward pass over the proof:
+\paragraph{Independence.}
+The checker shares no code with \texttt{cdcl.py}.
+It can be used to validate proofs from \emph{any} solver that emits
+the same format, not just ours.
+
+\paragraph{Algorithm.}
+The checker reads the DIMACS instance into a dictionary
+$\textit{clause\_db}\colon \mathbb{Z} \to \mathcal{P}(\mathbb{Z})$
+(mapping clause ID to literal set), then makes one forward pass:
 
 \begin{enumerate}
   \item Look up $C_1 = \textit{clause\_db}[\textit{id1}]$ and
         $C_2 = \textit{clause\_db}[\textit{id2}]$ in $O(1)$.
-  \item Check $-\textit{pivot} \in C_1$ and $+\textit{pivot} \in C_2$.
+  \item Verify $-\textit{pivot} \in C_1$ and $+\textit{pivot} \in C_2$.
   \item Compute the expected resolvent
-        $(C_1 \setminus \{-p\}) \cup (C_2 \setminus \{p\})$ and
-        compare with the declared one.
-  \item Store the resolvent under \textit{new\_id}.
+        $(C_1 \setminus \{-p\}) \cup (C_2 \setminus \{p\})$
+        and compare with the declared literals.
+  \item Store the validated resolvent under \textit{new\_id}.
 \end{enumerate}
 
 After the scan, the checker asserts that the last produced clause is
 the empty set.
-Time complexity is $O(N \cdot K)$ where $N$ is the number of proof
-steps and $K$ the maximum clause size: linear in the total size of the
-proof.
+Time complexity is $O(N \cdot K)$ where $N$ is the number of steps
+and $K$ the maximum clause size: linear in the total proof size.
+The checker never backtracks and never re-reads a line.
 
 %-----------------------------------------------------------------------
 \section{Experimental Evaluation}
 %-----------------------------------------------------------------------
 
-\subsection{Setup}
+\subsection{Test Suite Design}
 
-All experiments run on a single core (Python 3.12, no external
-libraries).
-The dataset consists of:
+The test suite covers three categories, all runnable via
+\texttt{run\_experiments.py}:
+
 \begin{itemize}
-  \item Two small satisfiable instances (\texttt{prop.cnf},
-    \texttt{simple.cnf}) for sanity checking.
-  \item \texttt{DPLL example2}: a 2-variable, 4-clause unsatisfiable
-    formula used as a minimal proof test.
-  \item Pigeon-hole instances $\text{hole}_n$ (PHP$_{n}^{n+1}$):
-    placing $n{+}1$ pigeons in $n$ holes, which are unsatisfiable and
-    known to require exponentially large resolution proofs~\cite{cook1976}.
+  \item \textbf{SAT instances} (\texttt{prop.cnf}, \texttt{simple.cnf},
+    \texttt{single\_literal.cnf}, \texttt{empty\_lines.cnf},
+    \texttt{with\_comments.cnf}, \texttt{multiline.cnf},
+    \texttt{large.cnf}): verify that the DIMACS reader handles varied
+    formatting (blank lines, inline comments, multi-line clauses) and
+    that satisfiable instances are not mistakenly declared unsatisfiable.
+  \item \textbf{UNSAT edge cases}:
+    \texttt{border\_level0.cnf} ($\{x_1\} \wedge \{\neg x_1\}$)
+    is the minimal UNSAT instance, testing the level-0 conflict path
+    where no decision is ever made.
+    \texttt{DPLL example2} (2 variables, 4 clauses) tests the minimal
+    non-trivial proof of 4 resolution steps.
+  \item \textbf{Pigeon-hole benchmarks} $\text{PHP}^{n+1}_n$:
+    exponentially hard for resolution~\cite{cook1976}, used to stress-test
+    proof size and checker performance.
 \end{itemize}
+
+\subsection{Experiment Runner (\texttt{run\_experiments.py})}
+
+Running experiments manually is error-prone and not reproducible.
+\texttt{run\_experiments.py} automates the full pipeline:
+(1) invoke the solver on each instance,
+(2) write the proof file for \textsc{Unsat} instances,
+(3) call \texttt{check\_proof()} directly (no subprocess overhead) to
+validate the proof,
+(4) print a formatted results table.
+Three modes are provided:
+
+\begin{lstlisting}
+python run_experiments.py                 # SAT + UNSAT edge cases
+python run_experiments.py --pigeon        # add hole6/7/8
+python run_experiments.py --hole 6 7 8    # choose specific instances
+python run_experiments.py --check-only    # verify existing proof files
+python run_experiments.py --clean         # delete generated proof files
+\end{lstlisting}
 
 \subsection{Results}
 
-\Cref{tab:results} summarises solver and checker performance across all
-11 test instances.
-All \textsc{Unsat} instances produce proofs verified as \textbf{PROOF VALID}
-by the independent checker.
+\Cref{tab:results} summarises results across all 12 test instances
+(12/12 correct).
 
 \begin{table}[htb]
 \centering
-\caption{Full solver and checker results (11 instances, 11/11 correct).
-  Proof information is reported only for \textsc{Unsat} instances;
-  ``---'' = not applicable.}
+\caption{Full results (12 instances, 12/12 correct).
+  Proof information is reported only for \textsc{Unsat} instances.}
 \label{tab:results}
-\begin{tabular}{@{}lrrrrrrl@{}}
+\begin{tabular}{@{}lrrrrrl@{}}
 \toprule
-Instance & Vars & Clauses & Result & Solver (s) & Proof steps & Proof size & Checked \\
+Instance & Vars & Clauses & Result & Solver (s) & Proof steps & Checked \\
 \midrule
-\texttt{prop.cnf}           &  3 &    3 & SAT   & $<$0.001 & ---        & ---       & ---   \\
-\texttt{simple.cnf}         &  3 &    2 & SAT   & $<$0.001 & ---        & ---       & ---   \\
-\texttt{single\_literal.cnf}&  5 &    4 & SAT   & $<$0.001 & ---        & ---       & ---   \\
-\texttt{empty\_lines.cnf}   &  2 &    2 & SAT   & $<$0.001 & ---        & ---       & ---   \\
-\texttt{with\_comments.cnf} &  4 &    3 & SAT   & $<$0.001 & ---        & ---       & ---   \\
-\texttt{multiline.cnf}      &  6 &    3 & SAT   & $<$0.001 & ---        & ---       & ---   \\
-\texttt{large.cnf}          & 10 &    5 & SAT   & $<$0.001 & ---        & ---       & ---   \\
-\texttt{DPLL example2}      &  2 &    4 & UNSAT & $<$0.001 & 4          & $<$1\,KB  & VALID \\
-\texttt{hole6.cnf}          & 42 &  133 & UNSAT & 0.27     & 5\,124     & 278\,KB   & VALID \\
-\texttt{hole7.cnf}          & 56 &  204 & UNSAT & 2.66     & 18\,206    & 1.2\,MB   & VALID \\
-\texttt{hole8.cnf}          & 72 &  297 & UNSAT & 26.2     & 61\,077    & 4.6\,MB   & VALID \\
+\texttt{prop.cnf}            &  3 &    3 & SAT   & $<$0.001 & ---      & ---   \\
+\texttt{simple.cnf}          &  3 &    2 & SAT   & $<$0.001 & ---      & ---   \\
+\texttt{single\_literal.cnf} &  5 &    4 & SAT   & $<$0.001 & ---      & ---   \\
+\texttt{empty\_lines.cnf}    &  2 &    2 & SAT   & $<$0.001 & ---      & ---   \\
+\texttt{with\_comments.cnf}  &  4 &    3 & SAT   & $<$0.001 & ---      & ---   \\
+\texttt{multiline.cnf}       &  6 &    3 & SAT   & $<$0.001 & ---      & ---   \\
+\texttt{large.cnf}           & 10 &    5 & SAT   & $<$0.001 & ---      & ---   \\
+\texttt{border\_level0.cnf}  &  1 &    2 & UNSAT & $<$0.001 & 1        & VALID \\
+\texttt{DPLL example2}       &  2 &    4 & UNSAT & $<$0.001 & 4        & VALID \\
+\texttt{hole6.cnf}           & 42 &  133 & UNSAT & 0.27     & 5\,124   & VALID \\
+\texttt{hole7.cnf}           & 56 &  204 & UNSAT & 2.66     & 18\,206  & VALID \\
+\texttt{hole8.cnf}           & 72 &  297 & UNSAT & 26.2     & 61\,077  & VALID \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{Discussion}
 
-All 11 test instances return the correct result (7 SAT, 4 UNSAT),
-and all 4 proofs are confirmed valid by the independent checker.
-The SAT instances---including \texttt{empty\_lines.cnf},
-\texttt{with\_comments.cnf}, and \texttt{multiline.cnf}---verify that
-the DIMACS reader handles varied formatting correctly.
+All 12 instances produce the correct result (7 SAT, 5 UNSAT), and all
+5 proofs are confirmed valid by the independent checker.
 
-The pigeon-hole family is a classical hard benchmark for resolution:
-the minimal refutation has exponential size in $n$~\cite{cook1976}.
-This is clearly visible in \cref{tab:results}:
-proof steps grow rapidly
-($5\,124 \to 18\,206 \to 61\,077$ for $n = 6,7,8$),
-as does solver time.
+The \texttt{border\_level0.cnf} instance ($\{x_1\} \wedge \{\neg x_1\}$)
+produces a single-step proof: clause~1 and clause~2 are resolved on
+pivot~$x_1$ directly to obtain the empty clause.
+This confirms that the level-0 edge case is handled correctly without
+invoking any decision or backtracking.
+
+The pigeon-hole results confirm the known exponential lower bound on
+resolution proof size~\cite{cook1976}: proof steps grow from
+$5\,124$ (hole6) to $18\,206$ (hole7) to $61\,077$ (hole8), a factor
+of roughly $3\times$ per unit increase in $n$.
 Despite the na\"ive implementation (no watched literals, no restart,
-no VSIDS), the solver handles all tested instances correctly.
-The checker verifies the largest proof (hole8, 61\,077 steps) in
-under 0.25 seconds, confirming the linear-time complexity claim.
+no VSIDS heuristic), all instances are solved correctly.
+The checker verifies the 4.6\,MB hole8 proof in under 0.25\,s,
+confirming the linear-time complexity of the checking algorithm.
 
-The key design decision was to keep the proof format \emph{as small as possible}:
-one line per resolution step, no redundant information.
-This makes both the logger and the checker trivial to implement and
-audit, while still satisfying the linear-time checking requirement.
+The key design decision---keeping the proof format minimal
+(one line per step, redundant resolvent spelled out)---pays off:
+the checker's correctness argument is a simple loop invariant with
+no auxiliary data structures beyond the clause dictionary.
 
 %-----------------------------------------------------------------------
 \section{Conclusion}
 %-----------------------------------------------------------------------
 
-We implemented a proof-producing CDCL solver and a linear-time
-checker, reusing the Tutorial~2 base solver with minimal invasive
-changes.
-The proof format is a simple line-oriented text format (one resolution
-step per line) that supports streaming verification.
-All tested \textsc{Unsat} instances produce correct proofs confirmed
-by the independent checker, including pigeon-hole instances up to
-$n=8$ (61\,077 proof steps, verified in 0.22\,s).
+We extended a Tutorial~2 CDCL solver with proof production and
+implemented an independent linear-time checker.
+The branch-free logger design, dual-map clause ID lookup, and
+postponed empty-clause derivation are the three main technical
+contributions.
+All 12 test instances are handled correctly, including the level-0
+conflict edge case and pigeon-hole instances up to $n=8$
+(61\,077 proof steps, checker time $<$0.25\,s).
 
-Future work could adopt the DRAT format~\cite{biere2008picosat},
-which allows compact encoding of modern CDCL optimisations such as
-clause deletion and non-resolution inferences, and is used by
-competition-grade solvers.
+Future work could adopt the DRAT format~\cite{biere2008picosat}, which
+supports clause deletion and non-resolution inferences used by
+competition-grade solvers, at the cost of a more complex checker.
 
 %-----------------------------------------------------------------------
 \bibliographystyle{unsrt}
