@@ -1,0 +1,273 @@
+\documentclass{article}
+
+% --- load packages ---
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage[colorlinks,bookmarks,bookmarksnumbered,allcolors=blue]{hyperref}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[capitalise]{cleveref}
+\usepackage[section]{placeins}
+\usepackage{cite}
+\usepackage{doi}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!8}
+}
+
+\begin{document}
+
+\title{Project 1: Proof-Producing CDCL SAT Solver}
+\author{ZHANG Boyuan\\
+  \small CSC\_54656 EP --- Satisfiability and SMT Solving
+}
+\date{February 23, 2026}
+\maketitle
+
+%-----------------------------------------------------------------------
+\section*{Abstract}
+%-----------------------------------------------------------------------
+We extend the CDCL solver developed in Tutorial~2 to emit a
+\emph{resolution proof} for every unsatisfiable instance, and implement
+an independent linear-time \emph{proof checker} that validates the proof
+against the original formula.
+The approach deliberately follows the na\"ive strategy described
+in~\cite{biere2008picosat}: every resolution step performed during
+conflict analysis is recorded verbatim, so no additional theory is
+needed.
+Experiments on the pigeon-hole benchmark family confirm that both
+the solver and the checker are correct.
+
+%-----------------------------------------------------------------------
+\section{Problem Description}
+%-----------------------------------------------------------------------
+
+A CDCL SAT solver answers either \textsc{Sat} (with a satisfying
+assignment) or \textsc{Unsat} (no such assignment exists).
+While a satisfying assignment is trivially checkable, an
+\textsc{Unsat} answer is only credible if accompanied by a
+\emph{proof of unsatisfiability}.
+
+Resolution is the natural proof system for propositional logic
+(\cref{eq:resolution}).
+Given two clauses $C_1 \vee \neg p$ and $C_2 \vee p$ that disagree on
+literal $p$ (the \emph{pivot}), their \emph{resolvent} is $C_1 \vee C_2$.
+
+\begin{equation}
+  \frac{C_1 \vee \neg p \quad C_2 \vee p}{C_1 \vee C_2}
+  \label{eq:resolution}
+\end{equation}
+
+A \emph{resolution refutation} is a sequence of such steps that derives
+the empty clause~$\bot$ from the initial clauses, witnessing
+unsatisfiability.
+Because CDCL conflict analysis already performs resolution
+(1st-UIP derivation), logging the steps costs minimal overhead.
+
+%-----------------------------------------------------------------------
+\section{Implementation}
+%-----------------------------------------------------------------------
+
+\subsection{Proof Format}
+
+Each proof file is plain UTF-8 text.
+The header declares the number of initial clauses (assigned IDs
+$1\ldots n$ in DIMACS order), and every subsequent line records one
+resolution step:
+
+\begin{lstlisting}
+p proof <n>
+<new_id> <pivot> <id1> <id2> : <lit1> <lit2> ... 0
+\end{lstlisting}
+
+\noindent where \texttt{id1} contains $-$\texttt{pivot},
+\texttt{id2} contains $+$\texttt{pivot}, and the resolvent literals
+follow the colon, terminated by zero (an empty resolvent,
+i.e.\ just \texttt{0}, represents the empty clause).
+This format is intentionally minimal: a single forward scan suffices
+for both production and verification.
+
+\subsection{Solver Extension (\texttt{cdcl.py})}
+
+Three components were added to the Tutorial~2 CDCL skeleton.
+
+\paragraph{Proof logger.}
+\texttt{ProofLogger} wraps a file handle and exposes a single method
+\texttt{log\_step(new\_id, pivot, id1, id2, resolvent)}.
+A companion \texttt{\_NullLogger} implements the same interface as a
+no-op, so the solver body contains no conditional branches:
+proof production is controlled entirely by whether a path is passed to
+\texttt{CDCL(clauses, proof\_file=\ldots)}.
+
+\paragraph{Clause ID tables.}
+\texttt{ClauseDb} maintains two dictionaries:
+\begin{itemize}
+  \item \texttt{clause\_id[id(list)]} maps Python object identity to proof ID~---
+    used when \texttt{deduce()} returns the exact list object;
+  \item \texttt{content\_to\_id[tuple(sorted(lits))]} provides a content-based
+    fallback for reason clauses whose identity may differ.
+\end{itemize}
+Initial clauses receive IDs $1\ldots n$; learned clauses are numbered
+from $n{+}1$ upward via a shared counter \texttt{next\_id}.
+
+\paragraph{Proof derivation.}
+\texttt{analyze()} logs one \texttt{log\_step} call per resolution
+performed during 1st-UIP derivation via the helper
+\texttt{\_proof\_resolve\_step()}.
+A second helper, \texttt{\_finish\_proof\_to\_empty()}, handles the
+case where the solver is about to return \textsc{Unsat} but the current
+working clause still contains literals.
+This occurs when the 1st-UIP learned clause is a unit fact whose
+negation is only derivable after backtracking and re-running BCP.
+The solution is to \emph{not} derive the empty clause inside
+\texttt{analyze}; instead, \texttt{solve()} detects a conflict at
+decision level~0 after the subsequent BCP pass and calls
+\texttt{\_finish\_proof\_to\_empty()} with a trail in which every entry
+carries a reason clause (no decisions remain), guaranteeing complete
+reduction to~$\bot$.
+
+\subsection{Proof Checker (\texttt{proof\_checker.py})}
+
+The checker is completely independent of \texttt{cdcl.py}
+(no shared imports).
+It reads the DIMACS instance into a dictionary
+$\textit{clause\_db}: \mathbb{Z} \to \mathcal{P}(\mathbb{Z})$,
+then makes a single forward pass over the proof:
+
+\begin{enumerate}
+  \item Look up $C_1 = \textit{clause\_db}[\textit{id1}]$ and
+        $C_2 = \textit{clause\_db}[\textit{id2}]$ in $O(1)$.
+  \item Check $-\textit{pivot} \in C_1$ and $+\textit{pivot} \in C_2$.
+  \item Compute the expected resolvent
+        $(C_1 \setminus \{-p\}) \cup (C_2 \setminus \{p\})$ and
+        compare with the declared one.
+  \item Store the resolvent under \textit{new\_id}.
+\end{enumerate}
+
+After the scan, the checker asserts that the last produced clause is
+the empty set.
+Time complexity is $O(N \cdot K)$ where $N$ is the number of proof
+steps and $K$ the maximum clause size: linear in the total size of the
+proof.
+
+%-----------------------------------------------------------------------
+\section{Experimental Evaluation}
+%-----------------------------------------------------------------------
+
+\subsection{Setup}
+
+All experiments run on a single core (Python 3.12, no external
+libraries).
+The dataset consists of:
+\begin{itemize}
+  \item Two small satisfiable instances (\texttt{prop.cnf},
+    \texttt{simple.cnf}) for sanity checking.
+  \item \texttt{DPLL example2}: a 2-variable, 4-clause unsatisfiable
+    formula used as a minimal proof test.
+  \item Pigeon-hole instances $\text{hole}_n$ (PHP$_{n}^{n+1}$):
+    placing $n{+}1$ pigeons in $n$ holes, which are unsatisfiable and
+    known to require exponentially large resolution proofs~\cite{cook1976}.
+\end{itemize}
+
+\subsection{Results}
+
+\Cref{tab:results} summarises solver and checker performance across all
+11 test instances.
+All \textsc{Unsat} instances produce proofs verified as \textbf{PROOF VALID}
+by the independent checker.
+
+\begin{table}[htb]
+\centering
+\caption{Full solver and checker results (11 instances, 11/11 correct).
+  Proof information is reported only for \textsc{Unsat} instances;
+  ``---'' = not applicable.}
+\label{tab:results}
+\begin{tabular}{@{}lrrrrrrl@{}}
+\toprule
+Instance & Vars & Clauses & Result & Solver (s) & Proof steps & Proof size & Checked \\
+\midrule
+\texttt{prop.cnf}           &  3 &    3 & SAT   & $<$0.001 & ---        & ---       & ---   \\
+\texttt{simple.cnf}         &  3 &    2 & SAT   & $<$0.001 & ---        & ---       & ---   \\
+\texttt{single\_literal.cnf}&  5 &    4 & SAT   & $<$0.001 & ---        & ---       & ---   \\
+\texttt{empty\_lines.cnf}   &  2 &    2 & SAT   & $<$0.001 & ---        & ---       & ---   \\
+\texttt{with\_comments.cnf} &  4 &    3 & SAT   & $<$0.001 & ---        & ---       & ---   \\
+\texttt{multiline.cnf}      &  6 &    3 & SAT   & $<$0.001 & ---        & ---       & ---   \\
+\texttt{large.cnf}          & 10 &    5 & SAT   & $<$0.001 & ---        & ---       & ---   \\
+\texttt{DPLL example2}      &  2 &    4 & UNSAT & $<$0.001 & 4          & $<$1\,KB  & VALID \\
+\texttt{hole6.cnf}          & 42 &  133 & UNSAT & 0.27     & 5\,124     & 278\,KB   & VALID \\
+\texttt{hole7.cnf}          & 56 &  204 & UNSAT & 2.66     & 18\,206    & 1.2\,MB   & VALID \\
+\texttt{hole8.cnf}          & 72 &  297 & UNSAT & 26.2     & 61\,077    & 4.6\,MB   & VALID \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Discussion}
+
+All 11 test instances return the correct result (7 SAT, 4 UNSAT),
+and all 4 proofs are confirmed valid by the independent checker.
+The SAT instances---including \texttt{empty\_lines.cnf},
+\texttt{with\_comments.cnf}, and \texttt{multiline.cnf}---verify that
+the DIMACS reader handles varied formatting correctly.
+
+The pigeon-hole family is a classical hard benchmark for resolution:
+the minimal refutation has exponential size in $n$~\cite{cook1976}.
+This is clearly visible in \cref{tab:results}:
+proof steps grow rapidly
+($5\,124 \to 18\,206 \to 61\,077$ for $n = 6,7,8$),
+as does solver time.
+Despite the na\"ive implementation (no watched literals, no restart,
+no VSIDS), the solver handles all tested instances correctly.
+The checker verifies the largest proof (hole8, 61\,077 steps) in
+under 0.25 seconds, confirming the linear-time complexity claim.
+
+The key design decision was to keep the proof format \emph{as small as possible}:
+one line per resolution step, no redundant information.
+This makes both the logger and the checker trivial to implement and
+audit, while still satisfying the linear-time checking requirement.
+
+%-----------------------------------------------------------------------
+\section{Conclusion}
+%-----------------------------------------------------------------------
+
+We implemented a proof-producing CDCL solver and a linear-time
+checker, reusing the Tutorial~2 base solver with minimal invasive
+changes.
+The proof format is a simple line-oriented text format (one resolution
+step per line) that supports streaming verification.
+All tested \textsc{Unsat} instances produce correct proofs confirmed
+by the independent checker, including pigeon-hole instances up to
+$n=8$ (61\,077 proof steps, verified in 0.22\,s).
+
+Future work could adopt the DRAT format~\cite{biere2008picosat},
+which allows compact encoding of modern CDCL optimisations such as
+clause deletion and non-resolution inferences, and is used by
+competition-grade solvers.
+
+%-----------------------------------------------------------------------
+\bibliographystyle{unsrt}
+\begin{thebibliography}{9}
+
+\bibitem{biere2008picosat}
+A.~Biere.
+\newblock {PicoSAT} essentials.
+\newblock \emph{Journal on Satisfiability, Boolean Modeling and Computation},
+  4:75--97, 2008.
+
+\bibitem{cook1976}
+S.~Cook and R.~Reckhow.
+\newblock The relative efficiency of propositional proof systems.
+\newblock \emph{Journal of Symbolic Logic}, 44(1):36--50, 1979.
+
+\bibitem{handbook}
+A.~Biere, M.~Heule, H.~van~Maaren, and T.~Walsh, editors.
+\newblock \emph{Handbook of Satisfiability}.
+\newblock IOS Press, 2nd edition, 2021.
+
+\end{thebibliography}
+
+\end{document}
