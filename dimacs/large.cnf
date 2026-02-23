@@ -1,0 +1,8 @@
+c Larger CNF file
+c 10 variables, 5 clauses
+p cnf 10 5
+1 2 3 -4 5 0
+-1 -2 6 7 0
+-3 8 9 10 0
+-5 -6 1 2 0
+-7 -8 -9 -10 0

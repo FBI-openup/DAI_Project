@@ -1,0 +1,6 @@
+c DPLL example2 - 2 variables, 4 clauses, UNSAT
+p cnf 2 4
+1 2 0
+-1 2 0
+1 -2 0
+-1 -2 0

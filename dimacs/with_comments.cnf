@@ -1,0 +1,11 @@
+c This is a test CNF file with comments
+c Author: Test Suite
+c Date: 2025-12-26
+c This file tests reading CNF with multiple comment lines
+p cnf 4 3
+c First clause
+1 2 0
+c Second clause with 3 literals
+-2 3 4 0
+c Third clause
+-1 -3 -4 0
