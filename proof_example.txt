@@ -1,117 +1,25 @@
-c ============================================================
-c  Resolution Proof Example — Proof Format Specification
-c  Project 1, CSC_54656
-c  Author: ZHANG Boyuan
-c ============================================================
+c Proof format example for Project 1 (CSC_54656 EP)
 c
-c  FORMULA (DIMACS input, 3 vars, 4 clauses → UNSAT)
-c  ─────────────────────────────────────────────────
-c  p cnf 3 4
-c  Clause 1:  1  2  0     ( x1 ∨ x2 )
-c  Clause 2: -1  3  0     (¬x1 ∨ x3 )
-c  Clause 3: -2 -3  0     (¬x2 ∨ ¬x3)
-c  Clause 4: -1 -2  0     (¬x1 ∨ ¬x2)
+c This file illustrates the resolution proof format used by cdcl.py.
 c
-c  These four clauses are jointly unsatisfiable.
-c  We derive the empty clause via three resolution steps.
+c Problem: [[1,2],[-1,2],[1,-2],[-1,-2]]  (DPLL example 2, UNSAT)
+c Initial clause IDs: 1..4
+c   1: { 1,  2}
+c   2: {-1,  2}
+c   3: { 1, -2}
+c   4: {-1, -2}
 c
-c ============================================================
-c  PROOF FILE FORMAT
-c ============================================================
+c Format of each resolution step:
+c   <new_id> <pivot> <id1> <id2> : <resolvent_literals...> 0
 c
-c  Header line:
-c    p proof <n>
-c  where <n> = total number of INITIAL clauses in the DIMACS file.
-c  Initial clauses receive IDs 1..n in the order they appear.
-c  Learned/derived clauses receive IDs n+1, n+2, ...
+c   new_id : ID assigned to the resolvent clause
+c   pivot  : the resolved literal (id1 contains -pivot, id2 contains +pivot)
+c   id1    : clause containing -pivot
+c   id2    : clause containing +pivot
+c   after ':' : resolvent literals, terminated by 0
+c               (empty resolvent = empty clause = contradiction)
 c
-c  Each subsequent line encodes ONE resolution step:
-c
-c    <new_id>  <pivot>  <id1>  <id2>  :  <lit1> <lit2> ... 0
-c
-c  Fields:
-c    new_id  — ID assigned to the newly produced (resolvent) clause.
-c    pivot   — The literal that is resolved away.
-c              id1 must contain -pivot, id2 must contain +pivot.
-c    id1     — ID of the first parent clause  (contains -pivot).
-c    id2     — ID of the second parent clause (contains +pivot).
-c    :       — separator (literal separator marker)
-c    lits 0  — The resolvent literals terminated by 0.
-c              Empty line ("... : 0") represents the EMPTY CLAUSE,
-c              which is the final witness of UNSAT.
-c
-c ============================================================
-c  DERIVATION (step-by-step)
-c ============================================================
-c
-c  Step 5: Resolve clause 1 (x1∨x2) and clause 2 (¬x1∨x3) on pivot x1
-c           (¬x1 is in clause 2? No — let's re-check sign convention)
-c
-c  Corrected derivation:
-c
-c  Clause 1:  x1 ∨  x2      id=1
-c  Clause 2: ¬x1 ∨  x3      id=2
-c  Clause 3: ¬x2 ∨ ¬x3      id=3
-c  Clause 4: ¬x1 ∨ ¬x2      id=4
-c
-c  Step 5: Resolve(1,2) on x1 → new clause  x2 ∨ x3    (id=5)
-c          id1=2 contains ¬x1 (-1), id2=1 contains x1 (+1), pivot=1
-c
-c  Step 6: Resolve(5,3) on x2 → new clause  x3 ∨ ¬x3   simplifies to ∅?
-c          Actually: Resolve(5,3): pivot=2
-c          C5 = {2,3}, C3 = {-2,-3}
-c          Result = {3} ∪ {-3} = {3,-3}  -- tautology, skip
-c
-c  Better path:
-c  Step 5: Resolve(1,4) on x2, pivot=2
-c          id1=4 contains ¬x2 (-2), id2=1 contains x2 (+2)
-c          C4={-1,-2}, C1={1,2} → remove -2 from C4, remove 2 from C1
-c          Result = {-1} ∪ {1} = {-1,1} — tautology again
-c
-c  Correct non-tautological derivation:
-c  Step 5: Resolve(1,2) on x1 (pivot=1)
-c          C2={-1,3}, C1={1,2}: -1∈C2, 1∈C1
-c          Result = {3} ∪ {2} = {2,3}    new_id=5
-c
-c  Step 6: Resolve(5,3) on x3 (pivot=3)
-c          C3={-2,-3}, C5={2,3}: -3∈C3, 3∈C5
-c          Result = {-2} ∪ {2} = {-2,2} — tautology
-c
-c  Step 6: Resolve(3,4) on x2 (pivot=2)
-c          C4={-1,-2}, C3={-2,-3}: neither contains +2 — wrong direction
-c          Swap: id1 must have -pivot, id2 must have +pivot
-c          pivot=2 means id2 contains +2. C3={-2,-3} contains -2, C1={1,2} contains +2
-c          Already done in Step 5.
-c
-c  Full correct derivation (4-clause UNSAT example):
-c  Step 5: Resolve C2(¬x1∨x3) and C4(¬x1∨¬x2) — no shared opposite literal
-c
-c  Use a simpler 3-clause UNSAT kernel for the example:
-c    A = { 1}    (x1)
-c    B = {-1, 2} (¬x1 ∨ x2)
-c    C = {-2}    (¬x2)
-c  Step 4: Resolve(B,A) on pivot=1: id1=B contains -1, id2=A contains 1 → {2}  id=4
-c  Step 5: Resolve(C,4) on pivot=2: id1=C contains -2, id2=4 contains  2 → {}  id=5 (empty)
-c
-
-c ============================================================
-c  ACTUAL PROOF FILE CONTENT BEGINS HERE
-c  (for the 3-clause UNSAT formula above: A, B, C with ids 1,2,3)
-c
-c  Initial clause IDs:
-c    1 :  1  0    ( x1 )
-c    2 : -1  2  0 (¬x1 ∨ x2)
-c    3 : -2  0    (¬x2)
-c ============================================================
-
-p proof 3
-
-c Step 4: Resolve clause 2 (¬x1∨x2) and clause 1 (x1) on pivot x1 (literal 1)
-c         id1=2 contains -1 (¬x1), id2=1 contains +1 (x1)
-c         Resolvent = (¬x1∨x2) − {¬x1}  ∪  (x1) − {x1} = {x2}
-4 1 2 1 : 2 0
-
-c Step 5: Resolve clause 3 (¬x2) and clause 4 (x2) on pivot x2 (literal 2)
-c         id1=3 contains -2 (¬x2), id2=4 contains +2 (x2)
-c         Resolvent = {} → EMPTY CLAUSE → UNSAT witness  ✓
-5 2 3 4 : 0
+p proof 4
+5 1 2 1 : 2 0
+6 1 4 3 : -2 0
+7 2 6 5 : 0
