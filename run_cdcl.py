@@ -15,12 +15,11 @@ def main():
         "input_file",
         help="Path to the DIMACS input file"
     )
-    # Project 1: optional proof output file
     parser.add_argument(
         "--proof", "-p",
         default=None,
         metavar="PROOF_FILE",
-        help="(Project 1) Output resolution proof to this file (UNSAT only)"
+        help="Output resolution proof to this file (UNSAT only)"
     )
 
     args = parser.parse_args()
