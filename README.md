@@ -46,7 +46,7 @@ python proof_checker.py dimacs/pigeon-hole/hole6.cnf proof_hole6.txt
 `run_experiments.py` automates the full pipeline: solve, generate proof, verify, and print a results table.
 
 ```bash
-# Basic tests (SAT instances + UNSAT edge cases), fast
+# Basic tests (SAT instances + UNSAT edge cases)
 python run_experiments.py
 
 # Add pigeon-hole hole6, hole7, hole8
@@ -55,7 +55,7 @@ python run_experiments.py --pigeon
 # Choose specific hole instances
 python run_experiments.py --hole 6 7
 
-# All instances including hole9 and hole10 (slow)
+# All instances including hole9 and hole10
 python run_experiments.py --all
 
 # Verify already-generated proof files without re-running solver
@@ -100,30 +100,8 @@ See `proof_example.txt` for an annotated worked example.
 
 ## Implementation Notes
 
-- `CDCL(clauses).solve()` is unchanged from Tutorial 2 (backward compatible).
+- `CDCL(clauses).solve()` is unchanged from Tutorial 2.
 - Pass `proof_file="path.txt"` to enable proof production.
-- `proof_checker.py` has no imports from `cdcl.py` -- fully independent.
-- The solver uses a `_NullLogger` when proof production is off, so there are no conditional branches in the main loop.
-
----
-
-## Requirements Checklist
-
-### Tutorial 2 (CDCL Solver)
-
-- [x] BCP (Boolean Constraint Propagation)
-- [x] Decision heuristic
-- [x] 1st-UIP conflict analysis with resolution
-- [x] Non-chronological backtracking
-- [x] Clause learning
-- [x] Interface unchanged: `__init__()` and `solve()`
-
-### Project 1 (Resolution Proof)
-
-- [x] Proof recorded during conflict analysis
-- [x] One resolution step per line, terminated by 0
-- [x] Level-0 conflict handled (`border_level0.cnf`)
-- [x] End-of-proof derivation to empty clause via `_finish_proof_to_empty`
-- [x] Independent linear-time `proof_checker.py`
-- [x] Verified on hole6 (5124 steps), hole7 (18206), hole8 (61077)
-- [x] Backward-compatible `proof_file` kwarg
+- `proof_checker.py` has no imports from `cdcl.py`: fully independent.
+- The solver uses a `_NullLogger` when proof production is off, avoiding conditional branches in the main loop.
+- The `clean` branch contains minimal comments (original handout comments only for existing files).

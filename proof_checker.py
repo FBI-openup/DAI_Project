@@ -1,13 +1,11 @@
-"""
-Proof Checker for CDCL Resolution Proofs
-Author: ZHANG Boyuan
-Course: CSC_54656 Project 1
-
-Usage:
-    python proof_checker.py <dimacs_file> <proof_file>
-
-Time complexity: O(n * k) where n = number of proof steps, k = max clause size.
-"""
+# =============================================================================
+# proof_checker.py -- Independent Resolution Proof Verifier for Project 1
+# =============================================================================
+#
+# USAGE:
+#   python proof_checker.py <dimacs_file> <proof_file>
+#
+# =============================================================================
 
 import sys
 import time
@@ -33,27 +31,18 @@ def read_dimacs(filename):
 
 
 def parse_proof_line(line):
-    """Parse one resolution step line from the proof file.
-
-    Expected format:
-        <new_id> <pivot> <id1> <id2> : <lit1> <lit2> ... 0
-
-    Returns:
-        (new_id, pivot, id1, id2, resolvent_frozenset)
-        or None if the line is a comment / header / blank.
-    """
     line = line.strip()
     if not line or line.startswith('c') or line.startswith('p'):
         return None
 
     if ':' not in line:
-        raise ValueError("Malformed proof line (no ':'): %r" % line)
+        raise ValueError("Malformed proof line")
 
     left, right = line.split(':', 1)
     left_parts = left.split()
 
     if len(left_parts) < 4:
-        raise ValueError("Malformed proof line (expected 4 fields before ':'): %r" % line)
+        raise ValueError("Malformed proof line")
 
     new_id = int(left_parts[0])
     pivot  = int(left_parts[1])
@@ -67,11 +56,6 @@ def parse_proof_line(line):
 
 
 def check_proof(dimacs_file, proof_file):
-    """Verify the resolution proof against the DIMACS instance.
-
-    Returns:
-        (valid: bool, message: str, stats: dict)
-    """
     _, init_clauses = read_dimacs(dimacs_file)
     clause_db = {}
 
@@ -79,7 +63,6 @@ def check_proof(dimacs_file, proof_file):
         clause_db[idx + 1] = frozenset(c)
 
     n_initial = len(init_clauses)
-
     steps_verified = 0
     last_resolvent = None
     last_new_id    = None
@@ -101,26 +84,20 @@ def check_proof(dimacs_file, proof_file):
             new_id, pivot, id1, id2, resolvent_declared = parsed
 
             if id1 not in clause_db:
-                return False, "Line %d: clause ID %d not found (step new_id=%d)" % (lineno, id1, new_id), {}
+                return False, "Line %d: ID %d missing" % (lineno, id1), {}
             if id2 not in clause_db:
-                return False, "Line %d: clause ID %d not found (step new_id=%d)" % (lineno, id2, new_id), {}
+                return False, "Line %d: ID %d missing" % (lineno, id2), {}
 
             c1 = clause_db[id1]
             c2 = clause_db[id2]
 
-            if -pivot not in c1:
-                return False, "Line %d: id1=%d %s does not contain -pivot=%d" % (lineno, id1, set(c1), -pivot), {}
-            if pivot not in c2:
-                return False, "Line %d: id2=%d %s does not contain +pivot=%d" % (lineno, id2, set(c2), pivot), {}
+            if -pivot not in c1 or pivot not in c2:
+                return False, "Line %d: Invalid pivot" % lineno, {}
 
             expected_resolvent = (c1 - {-pivot}) | (c2 - {pivot})
 
             if resolvent_declared != expected_resolvent:
-                return False, (
-                    "Line %d: resolvent mismatch for new_id=%d.\n"
-                    "  Declared : %s\n"
-                    "  Expected : %s" % (lineno, new_id, set(resolvent_declared), set(expected_resolvent))
-                ), {}
+                return False, "Line %d: Resolvent mismatch" % lineno, {}
 
             clause_db[new_id] = resolvent_declared
             last_resolvent    = resolvent_declared
@@ -128,19 +105,11 @@ def check_proof(dimacs_file, proof_file):
             steps_verified   += 1
 
     if last_resolvent is None:
-        return False, "Proof file contains no resolution steps.", {}
-
+        return False, "Empty proof", {}
     if last_resolvent != frozenset():
-        return False, (
-            "Proof does not end with the empty clause.\n"
-            "Last step (id=%d) produced: %s" % (last_new_id, set(last_resolvent))
-        ), {}
+        return False, "Proof does not end with empty clause (ID %d)" % last_new_id, {}
 
-    stats = {
-        "n_initial_clauses" : n_initial,
-        "n_steps_verified"  : steps_verified,
-    }
-    return True, "PROOF VALID.", stats
+    return True, "PROOF VALID", {"n_initial": n_initial, "steps": steps_verified}
 
 
 def main():
@@ -151,30 +120,16 @@ def main():
     dimacs_file = sys.argv[1]
     proof_file  = sys.argv[2]
 
-    print("Checking proof...")
-    print("  DIMACS : %s" % dimacs_file)
-    print("  Proof  : %s" % proof_file)
-    print()
-
     t_start = time.perf_counter()
     valid, message, stats = check_proof(dimacs_file, proof_file)
     t_end   = time.perf_counter()
-    elapsed = t_end - t_start
 
     if valid:
-        print("=" * 60)
-        print("PROOF VALID")
-        print("=" * 60)
-        print("  Initial clauses  : %s" % stats.get("n_initial_clauses", "?"))
-        print("  Steps verified   : %s" % stats.get("n_steps_verified", "?"))
-        print("  Checker time     : %.6fs" % elapsed)
+        print("PROOF VALID (%.4fs)" % (t_end - t_start))
+        print("Initial: %d, Steps: %d" % (stats["n_initial"], stats["steps"]))
         sys.exit(0)
     else:
-        print("=" * 60)
-        print("PROOF INVALID")
-        print("=" * 60)
-        print("  Reason : %s" % message)
-        print("  Checker time : %.6fs" % elapsed)
+        print("PROOF INVALID: %s" % message)
         sys.exit(1)
 
 
