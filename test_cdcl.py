@@ -1,15 +1,16 @@
 # COMMANDS
 # --------
-#   python run_experiments.py                     basic SAT/UNSAT tests (9 instances)
-#   python run_experiments.py --hole 6          specific hole instances
-#   python run_experiments.py --all               all instances incl. hole9/10 (slow!)
-#   python run_experiments.py --all12             exactly the 12 instances from Table 1
+#   python test_cdcl.py                     basic SAT/UNSAT tests (9 instances)
+#   python test_cdcl.py --pigeon            basic + pigeon-hole hole6/7/8
+#   python test_cdcl.py --hole 6 7          specific hole instances
+#   python test_cdcl.py --all               all instances incl. hole9/10 (slow!)
+#   python test_cdcl.py --all12             exactly the 12 instances from Table 1
 #
-#   python run_experiments.py --check-only        verify existing proof files (no solver)
+#   python test_cdcl.py --check-only        verify existing proof files (no solver)
 #
-#   python run_experiments.py --clean             delete generated proof_*.txt files
-#                                                 (proof_example.txt is preserved as
-#                                                  a format illustration)
+#   python test_cdcl.py --clean             delete generated proof_*.txt files
+#                                           (proof_example.txt is preserved as
+#                                            a format illustration)
 
 import argparse
 import glob
@@ -89,7 +90,10 @@ def cmd_check_only(tests):
 
 def run_one(name, cnf_path, expected):
     if not os.path.isfile(cnf_path):
-        return {"name": name, "ok": False, "result": "ERROR"}
+        print("[file not found: %s]" % cnf_path)
+        return {"name": name, "vars": 0, "clauses": 0, "result": "ERROR",
+                "time": 0.0, "steps": None, "checker_time": None,
+                "checker": "---", "ok": False}
 
     clauses = read_dimacs(cnf_path)
     nvars      = max((abs(l) for cl in clauses for l in cl), default=0)
