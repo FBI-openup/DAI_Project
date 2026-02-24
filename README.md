@@ -12,8 +12,7 @@
 | `cdcl.py` | CDCL solver with resolution proof production |
 | `proof_checker.py` | Independent linear-time proof verifier |
 | `run_cdcl.py` | Command-line solver runner |
-| `run_experiments.py` | Automated experiment runner (solve + verify + table) |
-| `test_cdcl.py` | Unit test suite |
+| `test_cdcl.py` | Automated experiment runner: solve, verify, and print results table |
 | `proof_example.txt` | Annotated proof format illustration |
 | `dimacs/` | Test instances (SAT, UNSAT, pigeon-hole) |
 
@@ -43,36 +42,29 @@ python proof_checker.py dimacs/pigeon-hole/hole6.cnf proof_hole6.txt
 
 ## Running Experiments
 
-`run_experiments.py` automates the full pipeline: solve, generate proof, verify, and print a results table.
+`test_cdcl.py` automates the full pipeline: solve, generate proof, verify, and print a results table.
 
 ```bash
-# Basic tests (SAT instances + UNSAT edge cases)
-python run_experiments.py
+# Basic tests (SAT instances + UNSAT edge cases, 9 instances)
+python test_cdcl.py
 
 # Add pigeon-hole hole6, hole7, hole8
-python run_experiments.py --pigeon
+python test_cdcl.py --pigeon
 
 # Choose specific hole instances
-python run_experiments.py --hole 6 7
+python test_cdcl.py --hole 6 7
 
-# All instances including hole9 and hole10
-python run_experiments.py --all
+# Exactly the 12 instances from Table 1 in the report
+python test_cdcl.py --all12
+
+# All instances including hole9 and hole10 (slow)
+python test_cdcl.py --all
 
 # Verify already-generated proof files without re-running solver
-python run_experiments.py --check-only
-python run_experiments.py --check-only --pigeon
+python test_cdcl.py --check-only
 
 # Delete all generated proof_*.txt files (proof_example.txt is preserved)
-python run_experiments.py --clean
-```
-
----
-
-## Running Unit Tests
-
-```bash
-python test_cdcl.py           # all files in dimacs/
-python test_cdcl.py --verbose # detailed output per instance
+python test_cdcl.py --clean
 ```
 
 ---

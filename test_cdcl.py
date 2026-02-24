@@ -3,10 +3,10 @@
 #   python test_cdcl.py                     basic SAT/UNSAT tests (9 instances)
 #   python test_cdcl.py --pigeon            basic + pigeon-hole hole6/7/8
 #   python test_cdcl.py --hole 6 7          specific hole instances
-#   python test_cdcl.py --all               all instances incl. hole9/10 (slow!)
+#   python test_cdcl.py --all               all instances incl. hole9/10
 #   python test_cdcl.py --all12             exactly the 12 instances from Table 1
 #
-#   python test_cdcl.py --check-only        verify existing proof files (no solver)
+#   python test_cdcl.py --check-only        verify existing proof files
 #
 #   python test_cdcl.py --clean             delete generated proof_*.txt files
 #                                           (proof_example.txt is preserved as
