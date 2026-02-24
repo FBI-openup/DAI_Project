@@ -1,208 +1,187 @@
-"""
-Automated test suite for CDCL SAT solver
+# COMMANDS
+# --------
+#   python run_experiments.py                     basic SAT/UNSAT tests (9 instances)
+#   python run_experiments.py --hole 6          specific hole instances
+#   python run_experiments.py --all               all instances incl. hole9/10 (slow!)
+#   python run_experiments.py --all12             exactly the 12 instances from Table 1
+#
+#   python run_experiments.py --check-only        verify existing proof files (no solver)
+#
+#   python run_experiments.py --clean             delete generated proof_*.txt files
+#                                                 (proof_example.txt is preserved as
+#                                                  a format illustration)
 
-Usage:
-    python test_cdcl.py              # Run all tests
-    python test_cdcl.py --verbose    # Show detailed output
-    python test_cdcl.py --timeout 5  # Set timeout (default: 10 seconds)
-"""
-
+import argparse
+import glob
 import os
 import sys
 import time
-import argparse
-from cdcl import read_dimacs, CDCL
+import subprocess
 
-# Optional: Define expected results for known test cases
-# Format: {filename: expected_result}
-# Set to None if you don't know the expected result
-EXPECTED_RESULTS = {
-    'DPLL example2': 'UNSAT',
-    'simple.cnf': 'SAT',
-    'single_literal.cnf': 'SAT',
-    # Additional test files (manually verified by analyzing CNF logic)
-    # All verified to be satisfiable with simple variable assignments
-    'empty_lines.cnf': 'SAT',
-    'large.cnf': 'SAT',
-    'multiline.cnf': 'SAT',
-    'with_comments.cnf': 'SAT',
+from cdcl import read_dimacs, CDCL
+from proof_checker import check_proof
+
+
+BASIC_TESTS = [
+    ("prop.cnf",           "prop.cnf",                       "SAT"),
+    ("simple.cnf",         "dimacs/simple.cnf",              "SAT"),
+    ("single_literal.cnf", "dimacs/single_literal.cnf",      "SAT"),
+    ("empty_lines.cnf",    "dimacs/empty_lines.cnf",         "SAT"),
+    ("with_comments.cnf",  "dimacs/with_comments.cnf",       "SAT"),
+    ("multiline.cnf",      "dimacs/multiline.cnf",           "SAT"),
+    ("large.cnf",          "dimacs/large.cnf",               "SAT"),
+    ("DPLL example2",      "dimacs/DPLL example2",           "UNSAT"),
+    ("border_level0.cnf",  "dimacs/border_level0.cnf",       "UNSAT"),
+]
+
+PIGEON_TESTS = {
+    6:  ("hole6.cnf",  "dimacs/pigeon-hole/hole6.cnf",  "UNSAT"),
+    7:  ("hole7.cnf",  "dimacs/pigeon-hole/hole7.cnf",  "UNSAT"),
+    8:  ("hole8.cnf",  "dimacs/pigeon-hole/hole8.cnf",  "UNSAT"),
+    9:  ("hole9.cnf",  "dimacs/pigeon-hole/hole9.cnf",  "UNSAT"),
+    10: ("hole10.cnf", "dimacs/pigeon-hole/hole10.cnf", "UNSAT"),
 }
 
-class TestResult:
-    """Store test result information"""
-    def __init__(self, filename):
-        self.filename = filename
-        self.result = None  # 'SAT', 'UNSAT', or None
-        self.expected = EXPECTED_RESULTS.get(filename)
-        self.passed = None  # True/False/None
-        self.runtime = 0
-        self.error = None
-    
-    def check_pass(self):
-        """Check if test passed (if expected result is known)"""
-        if self.expected is None:
-            self.passed = None  # Unknown expected result
-        elif self.error:
-            self.passed = False
-        else:
-            self.passed = (self.result == self.expected)
+REPORT_TESTS = BASIC_TESTS + [
+    PIGEON_TESTS[6],
+    PIGEON_TESTS[7],
+    PIGEON_TESTS[8],
+]
 
 
-def run_test(filepath, timeout=10, verbose=False):
-    """
-    Run a single test case
-    
-    Args:
-        filepath: Path to the DIMACS file
-        timeout: Maximum time allowed (not implemented yet)
-        verbose: Print detailed output
-    
-    Returns:
-        TestResult object
-    """
-    filename = os.path.basename(filepath)
-    result = TestResult(filename)
-    
-    if verbose:
-        print(f"\n{'='*60}")
-        print(f"Testing: {filename}")
-        print(f"{'='*60}")
-    
-    try:
-        # Read and solve
-        start_time = time.time()
-        clauses = read_dimacs(filepath)
-        cdcl = CDCL(clauses)
-        sat = cdcl.solve()
-        end_time = time.time()
-        
-        result.runtime = end_time - start_time
-        result.result = 'SAT' if sat else 'UNSAT'
-        
-        if verbose:
-            print(f"Result: {result.result}")
-            print(f"Runtime: {result.runtime:.4f}s")
-        
-    except Exception as e:
-        result.error = str(e)
-        if verbose:
-            print(f"ERROR: {e}")
-    
-    result.check_pass()
-    return result
+def proof_filename(name):
+    return "proof_%s.txt" % name.replace(" ", "_").replace("/", "_")
 
 
-def print_summary(results, verbose=False):
-    """Print test summary"""
-    print(f"\n{'='*70}")
-    print("TEST SUMMARY")
-    print(f"{'='*70}")
-    
-    total = len(results)
-    passed = sum(1 for r in results if r.passed is True)
-    failed = sum(1 for r in results if r.passed is False)
-    unknown = sum(1 for r in results if r.passed is None)
-    errors = sum(1 for r in results if r.error is not None)
-    
-    # Print individual results
-    print(f"\n{'File':<25} {'Result':<8} {'Expected':<8} {'Status':<10} {'Time':<8}")
-    print(f"{'-'*70}")
-    
-    for r in results:
-        status = "[PASS]" if r.passed is True else "[FAIL]" if r.passed is False else "[UNK]"
-        expected_str = r.expected if r.expected else "N/A"
-        result_str = r.result if r.result else "ERROR"
+def cmd_clean():
+    files = [f for f in glob.glob("proof_*.txt") if f != "proof_example.txt"]
+    if not files:
+        print("No proof files found.")
+        return
+    for f in files:
+        os.remove(f)
+        print("Deleted %s" % f)
+    print("Cleaned %d file(s)." % len(files))
+
+
+def cmd_check_only(tests):
+    print("\nPROOF VERIFICATION")
+    print("-" * 90)
+    passed = failed = missing = 0
+    for name, cnf_path, expected in tests:
+        if expected == "SAT":
+            continue
+        pf = proof_filename(name)
+        if not os.path.isfile(pf):
+            missing += 1
+            continue
         
-        print(f"{r.filename:<25} {result_str:<8} {expected_str:<8} {status:<10} {r.runtime:.4f}s")
-    
-    # Print statistics
-    print(f"\n{'-'*70}")
-    print(f"Total tests:     {total}")
-    print(f"Passed:          {passed}")
-    print(f"Failed:          {failed}")
-    print(f"Unknown:         {unknown}")
-    print(f"Errors:          {errors}")
-    
-    if total > 0:
-        if unknown == total:
-            print(f"\nNote: All tests have unknown expected results")
-            print(f"Pass rate: N/A (no expected results defined)")
-        else:
-            known_tests = passed + failed
-            pass_rate = (passed / known_tests * 100) if known_tests > 0 else 0
-            print(f"Pass rate:       {pass_rate:.1f}% ({passed}/{known_tests} tests with known results)")
-    
-    # Print failed tests details
-    if failed > 0:
-        print(f"\n{'='*70}")
-        print("FAILED TESTS:")
-        print(f"{'='*70}")
-        for r in results:
-            if r.passed is False:
-                print(f"\n{r.filename}:")
-                print(f"  Expected: {r.expected}")
-                print(f"  Got:      {r.result if r.result else 'ERROR'}")
-                if r.error:
-                    print(f"  Error:    {r.error}")
-    
-    print(f"\n{'='*70}\n")
+        t_start = time.perf_counter()
+        valid, _, _ = check_proof(cnf_path, pf)
+        t_check = time.perf_counter() - t_start
+
+        print("%-22s  %-8s (%.4fs)" % (name, "VALID" if valid else "INVALID", t_check))
+        if valid: passed += 1
+        else: failed += 1
+    print("-" * 90)
+    print("Result: %d valid, %d invalid, %d missing" % (passed, failed, missing))
+
+
+def run_one(name, cnf_path, expected):
+    if not os.path.isfile(cnf_path):
+        return {"name": name, "ok": False, "result": "ERROR"}
+
+    clauses = read_dimacs(cnf_path)
+    nvars      = max((abs(l) for cl in clauses for l in cl), default=0)
+    n_clauses  = len(clauses)          # snapshot BEFORE solve() appends learned clauses
+    pf = proof_filename(name) if expected == "UNSAT" else None
+
+    t0 = time.perf_counter()
+    solver = CDCL(clauses, proof_file=pf)
+    sat    = solver.solve()
+    solver.proof.close()
+    t1 = time.perf_counter()
+
+    result = "SAT" if sat else "UNSAT"
+    proof_steps = None
+    checker_time = None
+    checker_result = "n/a"
+    if pf and os.path.isfile(pf):
+        with open(pf) as f:
+            proof_steps = sum(1 for line in f if line and line[0].isdigit())
+        
+        t_c0 = time.perf_counter()
+        valid, _, _ = check_proof(cnf_path, pf)
+        checker_time = time.perf_counter() - t_c0
+        checker_result = "VALID" if valid else "INVALID"
+
+    return {
+        "name": name, "vars": nvars, "clauses": n_clauses,
+        "result": result, "time": t1 - t0, "steps": proof_steps,
+        "checker_time": checker_time, "checker": checker_result,
+        "ok": result == expected,
+    }
+
+
+def print_table(rows):
+    print("\n" + "=" * 95)
+    header = "%-20s %5s %5s %7s %10s %10s %12s %7s" % (
+        "Instance", "Vars", "Cls", "Res", "Time(s)", "Steps", "Check Time", "Status"
+    )
+    print(header)
+    print("-" * 95)
+    for r in rows:
+        status = "[OK]" if r["ok"] else "[FAIL]"
+        ctime_str = "%.4f" % r["checker_time"] if r["checker_time"] is not None else "---"
+        steps_str = str(r["steps"]) if r["steps"] is not None else "---"
+        print("%-20s %5d %5d %7s %10.4f %10s %12s %7s" % (
+            r["name"][:20], r["vars"], r["clauses"],
+            r["result"], r["time"], steps_str, ctime_str, status
+        ))
+    print("=" * 95)
+
+
+def build_test_list(args):
+    if args.all12:
+        return REPORT_TESTS
+        
+    tests = list(BASIC_TESTS)
+    if args.all:
+        for n in [6, 7, 8, 9, 10]: tests.append(PIGEON_TESTS[n])
+    elif args.hole:
+        for n in args.hole:
+            if n in PIGEON_TESTS: tests.append(PIGEON_TESTS[n])
+    elif args.pigeon:
+        for n in [6, 7, 8]: tests.append(PIGEON_TESTS[n])
+    return tests
 
 
 def main():
-    """Main test runner"""
-    parser = argparse.ArgumentParser(description='Test CDCL SAT solver')
-    parser.add_argument('--verbose', '-v', action='store_true',
-                       help='Show detailed output for each test')
-    parser.add_argument('--timeout', '-t', type=int, default=10,
-                       help='Timeout per test in seconds (default: 10)')
-    parser.add_argument('--dir', '-d', type=str, default='dimacs',
-                       help='Directory containing test files (default: dimacs)')
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pigeon", action="store_true")
+    parser.add_argument("--hole", type=int, nargs="+")
+    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--all12", action="store_true", help="Run the 12 instances from Table 1")
+    parser.add_argument("--check-only", action="store_true")
+    parser.add_argument("--clean", action="store_true")
     args = parser.parse_args()
-    
-    # Find all test files
-    dimacs_dir = args.dir
-    if not os.path.isdir(dimacs_dir):
-        print(f"Error: Directory '{dimacs_dir}' not found!")
-        sys.exit(1)
-    
-    test_files = []
-    for filename in os.listdir(dimacs_dir):
-        filepath = os.path.join(dimacs_dir, filename)
-        if os.path.isfile(filepath):
-            test_files.append(filepath)
-    
-    if not test_files:
-        print(f"No test files found in '{dimacs_dir}'")
-        sys.exit(1)
-    
-    test_files.sort()  # Sort for consistent order
-    
-    print(f"Found {len(test_files)} test files in '{dimacs_dir}'")
-    print(f"Running tests...")
-    
-    # Run all tests
+
+    if args.clean:
+        cmd_clean()
+        return
+
+    tests = build_test_list(args)
+    if args.check_only:
+        cmd_check_only(tests)
+        return
+
     results = []
-    for i, filepath in enumerate(test_files, 1):
-        if not args.verbose:
-            # Show progress
-            filename = os.path.basename(filepath)
-            print(f"[{i}/{len(test_files)}] Testing {filename}...", end=' ')
-            sys.stdout.flush()
-        
-        result = run_test(filepath, timeout=args.timeout, verbose=args.verbose)
-        results.append(result)
-        
-        if not args.verbose:
-            status = "[OK]" if result.passed is True else "[X]" if result.passed is False else "[?]"
-            print(f"{status} {result.result if result.result else 'ERROR'}")
-    
-    # Print summary
-    print_summary(results, verbose=args.verbose)
-    
-    # Exit with non-zero code if any tests failed
-    failed_count = sum(1 for r in results if r.passed is False)
-    sys.exit(1 if failed_count > 0 else 0)
+    for name, path, expected in tests:
+        print("Running %-22s ..." % name, end=" ", flush=True)
+        r = run_one(name, path, expected)
+        print("OK" if r["ok"] else "FAIL")
+        results.append(r)
+    print_table(results)
 
 
 if __name__ == "__main__":

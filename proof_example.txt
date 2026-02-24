@@ -1,4 +1,4 @@
-c Proof format example for Project 1 (CSC_54656 EP)
+c Proof format example for Project 1 
 c
 c This file illustrates the resolution proof format used by cdcl.py.
 c
